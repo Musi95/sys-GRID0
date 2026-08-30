@@ -21,9 +21,9 @@ if they all work... which brings me to the next point.
  There is a Ultrahand overlay ui. It shows the current status, lets a
   user pick a saved network or type the entire 16-digit network ID, applies a
   network change without rebooting, and has switches for the sysmodule, BSD,
-  NIFM and detailed logging, these logs get placed in /config/sys-zerotier and 
+  NIFM and detailed logging, these logs get placed in `/config/sys-zerotier` and 
   should a game crash upon trying to initialize lan, can be combined with the
-  crash report and dump inside /atmosphere/crash_reports. (therefore im leaving
+  crash report and dump inside `/atmosphere/crash_reports`. (therefore im leaving
   other game tests to anyone who uses this, and will fix whenever i can. Though
   being truthful, working on this has been so fun I may just continue fixing games
   myself.)
@@ -37,7 +37,7 @@ if they all work... which brings me to the next point.
 ## current limitations
 
 There are still things left to do. Games that only support local wireless mode
-need an `ldn:u` MITM before they can use ZeroTier. The LAN whitelist covers the
+need an ldn MITM before they can use ZeroTier. The LAN whitelist covers the
 games tested so far, but more compatibility testing is welcome. If something
 breaks, include `status.txt`, `uplink.log`, and (when enabled) `bsd.log` and
 `nifm.log` with the report so it can actually be investigated.
