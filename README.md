@@ -1,6 +1,6 @@
 # sys-zerotier
 
-A very work in progress port of ZeroTier to the nintendo switch as a sysmodule, very AI assisted in the making, yet extremely functional with better results than i had hoped. Get the latest release from the releases page, or read the build instructions in build.md
+A very work in progress port of ZeroTier to the Nintendo Switch as a sysmodule, very AI assisted in the making, yet extremely functional with better results than i had hoped. Get the latest release from the releases page, or read the build instructions in build.md
 
 ## where sys-zerotier is at right now
 
