@@ -15,6 +15,7 @@
 *.npdm
 *.nro
 *.ovl
+*.nacp
 
 # Release archives and generated packages
 /dist/
@@ -29,6 +30,7 @@
 **/authtoken.secret
 **/metricstoken.secret
 build.log
+/tests/test_vnet
 
 # Optional game ExeFS experiments
 /exefs/
