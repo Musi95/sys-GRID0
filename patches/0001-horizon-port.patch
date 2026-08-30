@@ -1,0 +1,429 @@
+diff --git a/include/ZeroTierOne.h b/include/ZeroTierOne.h
+index 04541773c..25b5a67c9 100644
+--- a/include/ZeroTierOne.h
++++ b/include/ZeroTierOne.h
+@@ -125,22 +125,51 @@ extern "C" {
+ /**
+  * Maximum number of pushed routes on a network
+  */
++/*
++ * Horizon: these caps size fixed arrays inside NetworkConfig, Capability and
++ * ZT_VirtualNetworkConfig, and they feed ZT_NETWORKCONFIG_DICT_CAPACITY, which
++ * in turn sizes two `new Buffer<...>` allocations in NetworkConfig.cpp. At
++ * upstream's values that made a single NetworkConfig 457 KB of .bss and forced
++ * a 3 MB malloc arena -- on a console where every custom sysmodule shares about
++ * 5 MB. These are local storage limits, not protocol constants: they cap how
++ * elaborate a network config this node will accept, nothing else.
++ *
++ * Sized for a private LAN-play network. If the controller pushes more rules,
++ * capabilities or tags than these allow, fromDictionary() rejects the config
++ * and the node never joins -- so keep the network's rule set simple.
++ */
++#ifdef __SWITCH__
++#define ZT_MAX_NETWORK_ROUTES 8
++#else
+ #define ZT_MAX_NETWORK_ROUTES 128
++#endif
+ 
+ /**
+  * Maximum number of statically assigned IP addresses per network endpoint using ZT address management (not DHCP)
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_ZT_ASSIGNED_ADDRESSES 4
++#else
+ #define ZT_MAX_ZT_ASSIGNED_ADDRESSES 32
++#endif
+ 
+ /**
+  * Maximum number of "specialists" on a network -- bridges, relays, etc.
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_NETWORK_SPECIALISTS 32
++#else
+ #define ZT_MAX_NETWORK_SPECIALISTS 512
++#endif
+ 
+ /**
+  * Maximum number of multicast group subscriptions per network
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_NETWORK_MULTICAST_SUBSCRIPTIONS 64
++#else
+ #define ZT_MAX_NETWORK_MULTICAST_SUBSCRIPTIONS 4096
++#endif
+ 
+ /**
+  * Rules engine revision ID, which specifies rules engine capabilities
+@@ -150,27 +179,47 @@ extern "C" {
+ /**
+  * Maximum number of base (non-capability) network rules
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_NETWORK_RULES 64
++#else
+ #define ZT_MAX_NETWORK_RULES 1024
++#endif
+ 
+ /**
+  * Maximum number of per-member capabilities per network
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_NETWORK_CAPABILITIES 4
++#else
+ #define ZT_MAX_NETWORK_CAPABILITIES 128
++#endif
+ 
+ /**
+  * Maximum number of per-member tags per network
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_NETWORK_TAGS 8
++#else
+ #define ZT_MAX_NETWORK_TAGS 128
++#endif
+ 
+ /**
+  * Maximum number of direct network paths to a given peer
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_PEER_NETWORK_PATHS 8
++#else
+ #define ZT_MAX_PEER_NETWORK_PATHS 64
++#endif
+ 
+ /**
+  * Maximum number of path configurations that can be set
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_CONFIGURABLE_PATHS 4
++#else
+ #define ZT_MAX_CONFIGURABLE_PATHS 32
++#endif
+ 
+ /**
+  * Maximum number of rules per capability
+@@ -190,7 +239,11 @@ extern "C" {
+ /**
+  * Maximum number of multicast groups a device / network interface can be subscribed to at once
+  */
++#ifdef __SWITCH__
++#define ZT_MAX_MULTICAST_SUBSCRIPTIONS 64
++#else
+ #define ZT_MAX_MULTICAST_SUBSCRIPTIONS 1024
++#endif
+ 
+ /**
+  * Maximum value for link quality (min is 0)
+diff --git a/node/Bond.cpp b/node/Bond.cpp
+index 8f9130462..d426e013e 100644
+--- a/node/Bond.cpp
++++ b/node/Bond.cpp
+@@ -217,7 +217,12 @@ SharedPtr<Link> Bond::getLinkBySocket(const std::string& policyAlias, uint64_t l
+ {
+ 	Mutex::Lock _l(_links_m);
+ 	char ifname[ZT_MAX_PHYSIFNAME] = {};
++#ifndef __SWITCH__
++	// Horizon: _binder is null here (OneService sets it) and Binder is an
++	// incomplete type, so the call is compiled out. ifname is already
++	// zero-initialised, which is the right answer for "no interface name".
+ 	_binder->getIfName((PhySocket*)((uintptr_t)localSocket), ifname, sizeof(ifname) - 1);
++#endif
+ 	std::string ifnameStr(ifname);
+ 	auto search = _interfaceToLinkMap[policyAlias].find(ifnameStr);
+ 	if (search == _interfaceToLinkMap[policyAlias].end()) {
+@@ -340,7 +345,9 @@ void Bond::nominatePathToBond(const SharedPtr<Path>& path, int64_t now)
+ 						_paths[i].ipvPref = sl->ipvPref();
+ 						_paths[i].mode = sl->mode();
+ 						_paths[i].enabled = sl->enabled();
++#ifndef __SWITCH__   // _phy is null in a sysmodule build; see above
+ 						_paths[i].localPort = _phy->getLocalPort((PhySocket*)((uintptr_t)path->localSocket()));
++#endif
+ 						_paths[i].onlyPathOnLink = ! bFoundCommonLink;
+ 					}
+ 				}
+diff --git a/node/Bond.hpp b/node/Bond.hpp
+index 5c7396d2c..28c8c9bf6 100644
+--- a/node/Bond.hpp
++++ b/node/Bond.hpp
+@@ -9,8 +9,25 @@
+ #ifndef ZT_BOND_HPP
+ #define ZT_BOND_HPP
+ 
++#ifdef __SWITCH__
++// Horizon: Bond keeps a Binder* and a Phy<Bond*>* that only OneService ever
++// sets -- a sysmodule does not build it. The real headers pull in ifaddrs.h,
++// net/if.h and SIOCGIFCONF, none of which newlib has. Forward declarations
++// cover the pointers; the node/ headers below are what osdep/Binder.hpp and
++// osdep/Phy.hpp were supplying transitively to half the tree (Mutex above all).
++#include "InetAddress.hpp"
++#include "Metrics.hpp"
++#include "Mutex.hpp"
++#include "Utils.hpp"
++#include <ZtOSUtilsSwitch.hpp>
++namespace ZeroTier {
++class Binder;
++template <typename HANDLER_PTR_TYPE> class Phy;
++}   // namespace ZeroTier
++#else
+ #include "../osdep/Binder.hpp"
+ #include "../osdep/Phy.hpp"
++#endif
+ #include "Packet.hpp"
+ #include "Path.hpp"
+ #include "RuntimeEnvironment.hpp"
+diff --git a/node/Constants.hpp b/node/Constants.hpp
+index 6baf8c7fe..f702fc5f0 100644
+--- a/node/Constants.hpp
++++ b/node/Constants.hpp
+@@ -297,7 +297,34 @@
+ /**
+  * Size of RX queue
+  */
++/* Horizon: each RXQueueEntry carries a full 7-fragment reassembly workspace --
++ * measured at 70,272 bytes apiece, so upstream's 32 makes sizeof(Switch)
++ * 2,248,912 bytes. Node::Node allocates Trace+Switch+Multicaster+Topology+
++ * SelfAwareness+Bond+PacketMultiplexer in ONE ::malloc, so that alone demands
++ * 2.16 MB of the arena.
++ *
++ * This is the window of *simultaneously in-flight fragmented* packets. With the
++ * ZeroTier network's MTU set to 1500 (which BSD_MITM.md already requires so a
++ * PC client and the console agree) almost nothing fragments, and LAN-play
++ * datagrams are far below one MTU. Four is a generous window; it costs 281 KB
++ * instead of 2.14 MB. */
++#ifdef __SWITCH__
++#define ZT_RX_QUEUE_SIZE 4
++#else
+ #define ZT_RX_QUEUE_SIZE 32
++#endif
++
++/* Size of Node::_lastIdentityVerification, the per-source-address rate gate for
++ * identity verification in _doHELLO(). It is indexed by
++ * InetAddress::rateGateHash(), so the mask and the array length are one
++ * decision and have to move together -- see InetAddress.hpp. Upstream's 16384
++ * entries are sized against the open internet; a private LAN-play network sees
++ * a handful of peers, and 1024 costs 8 KB instead of 128 KB. */
++#ifdef __SWITCH__
++#define ZT_RATE_GATE_HASH_MASK 0x3ff
++#else
++#define ZT_RATE_GATE_HASH_MASK 0x3fff
++#endif
+ 
+ /**
+  * Size of TX queue
+diff --git a/node/Identity.cpp b/node/Identity.cpp
+index 86f005280..7807091db 100644
+--- a/node/Identity.cpp
++++ b/node/Identity.cpp
+@@ -81,10 +81,38 @@ struct _Identity_generate_cond {
+ 	char* genmem;
+ };
+ 
++#ifdef __SWITCH__
++/* Horizon: this is a 2 MB allocation, and a sysmodule's heap is a fixed arena
++ * of a few megabytes. libstratosphere's operator new[] is a plain std::malloc
++ * -- it returns null on failure rather than throwing, and neither caller below
++ * checks, so an exhausted arena turns into a memset of 2 MB starting at address
++ * zero. That is a Data Abort on boot, which is how this was found.
++ *
++ * A `static char s_genmem[2 MB]` fixed that and caused a worse bug: 2 MB of
++ * .bss, resident for the life of the process, for a buffer used twice per boot
++ * for a few hundred milliseconds. On HOS 20.0.0+ Atmosphere can only move 14 MB
++ * from the applet pool into the SYSTEM resource limit group, shared by every
++ * custom sysmodule -- and `am` started aborting at boot with 2001-0132,
++ * svc::ResultLimitReached, because this buffer was a quarter of what we cost.
++ *
++ * So it comes from the process heap now, which svcSetHeapSize charges only
++ * while it is mapped, and goes straight back afterwards. The port layer owns
++ * that; see ztnx_genmem_alloc in sys-zerotier/source/zt_port.cpp. Both callers
++ * run on the node thread, so no lock is needed.
++ */
++extern "C" char *ztnx_genmem_alloc(void);
++extern "C" void ztnx_genmem_free(char *p);
++#define ZT_GENMEM_ALLOC() (ztnx_genmem_alloc())
++#define ZT_GENMEM_FREE(p) (ztnx_genmem_free(p))
++#else
++#define ZT_GENMEM_ALLOC() (new char[ZT_IDENTITY_GEN_MEMORY])
++#define ZT_GENMEM_FREE(p) (delete[] (p))
++#endif
++
+ void Identity::generate()
+ {
+ 	unsigned char digest[64];
+-	char* genmem = new char[ZT_IDENTITY_GEN_MEMORY];
++	char* genmem = ZT_GENMEM_ALLOC();
+ 
+ 	ECC::Pair kp;
+ 	do {
+@@ -98,7 +126,7 @@ void Identity::generate()
+ 	}
+ 	*_privateKey = kp.priv;
+ 
+-	delete[] genmem;
++	ZT_GENMEM_FREE(genmem);
+ }
+ 
+ bool Identity::locallyValidate() const
+@@ -108,9 +136,9 @@ bool Identity::locallyValidate() const
+ 	}
+ 
+ 	unsigned char digest[64];
+-	char* genmem = new char[ZT_IDENTITY_GEN_MEMORY];
++	char* genmem = ZT_GENMEM_ALLOC();
+ 	_computeMemoryHardHash(_publicKey.data, ZT_ECC_PUBLIC_KEY_SET_LEN, digest, genmem);
+-	delete[] genmem;
++	ZT_GENMEM_FREE(genmem);
+ 
+ 	unsigned char addrb[5];
+ 	_address.copyTo(addrb, 5);
+diff --git a/node/InetAddress.hpp b/node/InetAddress.hpp
+index e1dfc7e47..d9f66f103 100644
+--- a/node/InetAddress.hpp
++++ b/node/InetAddress.hpp
+@@ -601,7 +601,9 @@ struct InetAddress : public sockaddr_storage {
+ 				h += ((unsigned long)ip[5]);
+ 			} break;
+ 		}
+-		return (h & 0x3fff);
++		/* Paired with Node::_lastIdentityVerification's length; the mask lives in
++		 * Constants.hpp so the two cannot drift apart. */
++		return (h & ZT_RATE_GATE_HASH_MASK);
+ 	}
+ 
+ 	/**
+diff --git a/node/Node.hpp b/node/Node.hpp
+index 8ea09f551..dfacf0204 100644
+--- a/node/Node.hpp
++++ b/node/Node.hpp
+@@ -314,7 +314,7 @@ class Node : public NetworkController::Sender {
+ 	uint32_t _expectingRepliesTo[ZT_EXPECTING_REPLIES_BUCKET_MASK1 + 1][ZT_EXPECTING_REPLIES_BUCKET_MASK2 + 1];
+ 
+ 	// Time of last identity verification indexed by InetAddress.rateGateHash() -- used in IncomingPacket::_doHELLO() via rateGateIdentityVerification()
+-	int64_t _lastIdentityVerification[16384];
++	int64_t _lastIdentityVerification[ZT_RATE_GATE_HASH_MASK + 1];
+ 
+ 	// Statistics about stuff happening
+ 	volatile ZT_NodeStatistics _stats;
+diff --git a/node/PacketMultiplexer.cpp b/node/PacketMultiplexer.cpp
+index d396dcab1..d511aeb9c 100644
+--- a/node/PacketMultiplexer.cpp
++++ b/node/PacketMultiplexer.cpp
+@@ -62,7 +62,9 @@ void PacketMultiplexer::putFrame(void* tPtr, uint64_t nwid, void** nuptr, const
+ 
+ void PacketMultiplexer::setUpPostDecodeReceiveThreads(unsigned int concurrency, bool cpuPinningEnabled)
+ {
+-#if defined(__APPLE__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__WINDOWS__)
++#if defined(__APPLE__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__WINDOWS__) || defined(__SWITCH__)
++	// Horizon: a pool of post-decode ingestion threads is not viable inside
++	// a sysmodule's memory budget. The port drives the node from one thread.
+ 	return;
+ #endif
+ 	_enabled = true;
+diff --git a/node/Switch.cpp b/node/Switch.cpp
+index efa6c0ba2..04018e891 100644
+--- a/node/Switch.cpp
++++ b/node/Switch.cpp
+@@ -24,6 +24,10 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ 
++#ifndef __SWITCH__
++#include <thread>   // std::thread below; upstream relies on a transitive include
++#endif
++
+ namespace ZeroTier {
+ 
+ Switch::Switch(const RuntimeEnvironment* renv) : RR(renv), _lastBeaconResponse(0), _lastCheckedQueues(0), _lastUniteAttempt(8)
+@@ -492,7 +496,15 @@ void Switch::onLocalEthernet(void* tPtr, const SharedPtr<Network>& network, cons
+ 					// this prevents problems related to trying to do rx while inside of doing tx, such as acquiring same lock recursively
+ 					//
+ 
++#ifdef __SWITCH__
++					// Horizon: a sysmodule cannot spawn a detached thread per
++					// frame, and this port is IPv4-only, so NDP emulation is
++					// simply skipped.
++					(void)peerMac;
++					(void)adv;
++#else
+ 					std::thread([=]() { RR->node->putFrame(tPtr, network->id(), network->userPtr(), peerMac, from, ZT_ETHERTYPE_IPV6, 0, adv, 72); }).detach();
++#endif
+ 
+ 					return;	  // NDP emulation done. We have forged a "fake" reply, so no need to send actual NDP query.
+ 				}	// else no NDP emulation
+@@ -527,7 +539,15 @@ void Switch::onLocalEthernet(void* tPtr, const SharedPtr<Network>& network, cons
+ 		//
+ 		// same pattern as putFrame call above
+ 		//
++#ifdef __SWITCH__
++		// Horizon: a frame addressed to this node itself. The upstream
++		// code hands it to a detached thread to avoid re-entering the
++		// same lock; a sysmodule has no room for thread-per-frame, and
++		// the shim never generates self-addressed frames, so drop it.
++		(void)vlanId;
++#else
+ 		std::thread([=]() { RR->node->putFrame(tPtr, network->id(), network->userPtr(), from, to, etherType, vlanId, data, len); }).detach();
++#endif
+ 	}
+ 	else if (to[0] == MAC::firstOctetForNetwork(network->id())) {
+ 		// Destination is another ZeroTier peer on the same network
+diff --git a/node/Utils.cpp b/node/Utils.cpp
+index 705b6bd46..43d95acd2 100644
+--- a/node/Utils.cpp
++++ b/node/Utils.cpp
+@@ -88,12 +88,20 @@ namespace ZeroTier {
+ 
+ const uint64_t Utils::ZERO256[4] = { 0ULL, 0ULL, 0ULL, 0ULL };
+ 
++#ifdef __SWITCH__
++extern "C" void ztnx_secure_random_fill(void* buf, unsigned long len);
++#endif
++
+ const char Utils::HEXCHARS[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+ 
+ #ifdef ZT_ARCH_ARM_HAS_NEON
+ Utils::ARMCapabilities::ARMCapabilities() noexcept
+ {
+-#ifdef __APPLE__
++#if defined(__APPLE__) || defined(__SWITCH__)
++	// Horizon has no auxiliary vector, so getauxval() does not exist. The
++	// Tegra X1's Cortex-A57 implements the ARMv8-A Crypto Extensions
++	// unconditionally, so the answer is a constant. Build the core with
++	// -march=armv8-a+crypto or none of this is reachable anyway.
+ 
+ 	this->aes = true;
+ 	this->crc32 = true;
+@@ -214,7 +222,14 @@ void Utils::getSecureRandom(void* buf, unsigned int bytes)
+ 	static Mutex globalLock;
+ 	static Salsa20 s20;
+ 	static bool s20Initialized = false;
++#ifdef __SWITCH__
++	/* Horizon: csrng is a hardware CSPRNG behind one IPC call, not a /dev/urandom
++	 * file read, so there is nothing worth amortising over 64 KB. 4 KB keeps the
++	 * refill rate irrelevant and returns 60 KB of .bss to a 5 MB budget. */
++	static uint8_t randomBuf[4096];
++#else
+ 	static uint8_t randomBuf[65536];
++#endif
+ 	static unsigned int randomPtr = sizeof(randomBuf);
+ 
+ 	Mutex::Lock _l(globalLock);
+@@ -259,6 +274,20 @@ void Utils::getSecureRandom(void* buf, unsigned int bytes)
+ 		((uint8_t*)buf)[i] = randomBuf[randomPtr++];
+ 	}
+ 
++#elif defined(__SWITCH__)
++
++	// Horizon: the console's hardware CSPRNG. Provided by the port layer so
++	// that ZeroTier's core keeps its independence from libnx.
++	for (unsigned int i = 0; i < bytes; ++i) {
++		if (randomPtr >= sizeof(randomBuf)) {
++			ztnx_secure_random_fill(randomBuf, sizeof(randomBuf));
++			randomPtr = 0;
++			s20.crypt12(randomBuf, randomBuf, sizeof(randomBuf));
++			s20.init(randomBuf, randomBuf);
++		}
++		((uint8_t*)buf)[i] = randomBuf[randomPtr++];
++	}
++
+ #else	// not __WINDOWS__
+ 
+ 	static int devURandomFd = -1;

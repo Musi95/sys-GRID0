@@ -1,0 +1,11 @@
+[submodule "Atmosphere-libs"]
+	path = Atmosphere-libs
+	url = https://github.com/redluigi323/Atmosphere-libs.git
+	branch = sys-zerotier
+[submodule "ZeroTierOne"]
+	path = ZeroTierOne
+	url = https://github.com/redluigi323/ZeroTierOne.git
+	branch = sys-zerotier
+[submodule "overlay/lib/libultrahand"]
+	path = overlay/lib/libultrahand
+	url = https://github.com/ppkantorski/libultrahand.git
