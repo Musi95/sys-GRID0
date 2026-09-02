@@ -1,9 +1,7 @@
 # Building sys-zerotier
 
 These instructions build the sysmodule and its Ultrahand overlay from a clean
-checkout. The supported target is an aarch64 Nintendo Switch running
-Atmosphère.
-
+checkout.
 ## Prerequisites
 
 Install devkitPro with:
