@@ -17,11 +17,15 @@ SRC := test_vnet.cpp ../source/net/vnet.cpp
 
 all: run
 
-test_vnet: $(SRC) ../source/net/vnet.hpp ../source/net/net.hpp
+test_vnet: $(SRC) ../source/net/vnet.hpp ../source/net/net.hpp ../source/net/lan_route.hpp
 	$(CXX) $(CXXFLAGS) -o $@ $(SRC)
 
-run: test_vnet
+test_nifm_lifetime: test_nifm_lifetime.cpp ../source/mitm/nifm_lifetime.hpp
+	$(CXX) $(CXXFLAGS) -o $@ test_nifm_lifetime.cpp
+
+run: test_vnet test_nifm_lifetime
 	./test_vnet
+	./test_nifm_lifetime
 
 # The console is aarch64. Unaligned loads and sign-extension differences are the
 # usual surprises; compiling with the cross toolchain catches most of them even
@@ -33,4 +37,6 @@ cross:
 
 clean:
 	rm -f test_vnet
+	rm -f test_nifm_lifetime
 	rm -rf test_vnet.dSYM
+	rm -rf test_nifm_lifetime.dSYM

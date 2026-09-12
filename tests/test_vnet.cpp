@@ -9,6 +9,7 @@
  *   make -C tests && tests/test_vnet
  */
 #include "../source/net/vnet.hpp"
+#include "../source/net/lan_route.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -588,11 +589,39 @@ static void test_fuzz()
     expect(true, "200k malformed frames without a sanitizer trip");
 }
 
+static void test_lan_broadcast_routing()
+{
+    g_case = "LAN broadcast routing";
+    constexpr u32 overlay = 0x0A931152; // 10.147.17.82/24 from the capture
+    constexpr u32 mask = 0xFFFFFF00;
+    const auto broadcast = [=](u32 destination, u32 physical, u32 physicalMask) {
+        return IsLanBroadcast(destination, overlay, mask, physical, physicalMask);
+    };
+    expect(broadcast(0xFFFFFFFF, 0, 0), "limited broadcast without physical config");
+    expect(broadcast(0x0A9311FF, 0, 0), "managed /24 broadcast");
+    expect(!broadcast(0x0A931153, 0, 0), "managed peer remains unicast");
+    expect(broadcast(0xC0A801FF, 0xC0A8012A, 0xFFFFFF00), "physical /24 broadcast");
+    expect(broadcast(0xC0A8017F, 0xC0A8012A, 0xFFFFFF80), "physical /25 broadcast ending .127");
+    expect(broadcast(0xC0A8013F, 0xC0A8012A, 0xFFFFFFC0), "physical /26 broadcast ending .63");
+    expect(broadcast(0xC0A8012B, 0xC0A8012A, 0xFFFFFFFC), "physical /30 broadcast ending .43");
+    expect(broadcast(0xC0A801FF, 0xC0A8002A, 0xFFFFFE00), "physical /23 broadcast");
+    expect(!broadcast(0xC0A800FF, 0xC0A8002A, 0xFFFFFE00), ".255 host in /23 remains unicast");
+    expect(broadcast(0xC0A8FFFF, 0xC0A8012A, 0xFFFF0000), "physical /16 broadcast");
+    expect(!broadcast(0xC0A801FF, 0xC0A8012A, 0xFFFF0000), ".255 host in /16 remains unicast");
+    expect(!broadcast(0xC0A802FF, 0xC0A8012A, 0xFFFFFF00), "unrelated subnet is not broadcast");
+    expect(!broadcast(0xC0A801FF, 0, 0), "unknown physical network does not guess /24");
+    expect(!broadcast(0xC0A8012B, 0xC0A8012A, 0xFFFFFFFE), "/31 peer remains unicast");
+    expect(!broadcast(0xC0A8012A, 0xC0A8012A, 0xFFFFFFFF), "/32 local address is not broadcast");
+    expect(!broadcast(0xC0A8FF2A, 0xC0A8012A, 0xFFFF00FF), "noncontiguous mask is rejected");
+    expect(!broadcast(0x000000FF, 0, 0xFFFFFF00), "missing physical address is rejected");
+}
+
 int main()
 {
     std::printf("vnet tests\n");
 
     test_checksum();
+    test_lan_broadcast_routing();
     test_arp_reply();
     test_udp_send_broadcast();
     test_udp_receive_and_learn();

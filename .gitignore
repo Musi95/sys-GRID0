@@ -31,6 +31,8 @@
 **/metricstoken.secret
 build.log
 /tests/test_vnet
+/tests/test_nifm_lifetime
+/tests/*.dSYM/
 
 # Optional game ExeFS experiments
 /exefs/

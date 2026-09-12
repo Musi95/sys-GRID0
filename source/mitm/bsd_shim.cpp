@@ -12,6 +12,7 @@
 #include "bsd_shim.hpp"
 #include "lan_titles.hpp"
 #include "../zt_port.hpp"
+#include "../net/lan_route.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -522,7 +523,14 @@ namespace ztnx::mitm {
             if (!g_port->GetLanIpConfig(std::addressof(local), std::addressof(mask))) {
                 return false;
             }
-            *broadcast = ip == 0xFFFFFFFFu || ip == (local | ~mask);
+            u32 physical_ip = 0;
+            u32 physical_mask = 0;
+            {
+                std::scoped_lock lk(g_lan_sockets_lock);
+                physical_ip = g_physicalIp;
+                physical_mask = g_physicalMask;
+            }
+            *broadcast = net::IsLanBroadcast(ip, local, mask, physical_ip, physical_mask);
             return *broadcast || (ip & mask) == (local & mask);
         }
 
@@ -1340,12 +1348,18 @@ namespace ztnx::mitm {
          * treats that unrelated error as a dead LAN session and closes every
          * socket. A disabled MITM remains the local-LAN compatibility path. */
         bool overlay_sent = false;
-        if (addr.GetSize() >= 8 && g_port != nullptr) {
+        if (addr.GetSize() >= 8 && g_port != nullptr &&
+            static_cast<const u8 *>(addr.GetPointer())[1] == 2) {
             const u8 *p = static_cast<const u8 *>(addr.GetPointer());
             const u16 port = (u16)((p[2] << 8) | p[3]);
             const u32 dst_ip = ((u32)p[4] << 24) | ((u32)p[5] << 16) |
                                ((u32)p[6] << 8) | p[7];
-            const bool directed_broadcast = p[7] == 0xff;
+            /* Discovery can target either the physical or managed subnet.
+             * Checking the last octet assumes /24 and misroutes both smaller
+             * subnet broadcasts and larger subnet unicast addresses. Use the
+             * same classification as SendMMsg. */
+            bool directed_broadcast = false;
+            const bool overlay_destination = IsOverlayDestination(dst_ip, &directed_broadcast);
             s32 vfd = net::InvalidSocket;
             u16 bound_port = 0;
             {
@@ -1360,7 +1374,7 @@ namespace ztnx::mitm {
                 vfd = EnsureLanMirror(m_client_info.process_id.value, sockfd,
                                       bound_port, "first broadcast");
             }
-            overlay_sent = vfd != net::InvalidSocket &&
+            overlay_sent = overlay_destination && vfd != net::InvalidSocket &&
                 MirrorLanPayload(sockfd, vfd,
                                  dst_ip, port, directed_broadcast,
                                  buf.GetPointer(), buf.GetSize());

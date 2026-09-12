@@ -2,11 +2,15 @@
 #pragma once
 
 #include <stratosphere.hpp>
+#include "nifm_lifetime.hpp"
 
 namespace ztnx { class Port; }
 namespace ztnx::mitm {
     namespace hos = ::ams::hos;
     using Result = ::ams::Result;
+    /* libnx serviceClose has internal linkage. Give the owning template an
+     * external-linkage closer so these IPC class types agree across units. */
+    inline void CloseNifmService(Service *service) { serviceClose(service); }
     struct NifmIpV4Address { u8 addr[4]; };
     struct NifmIpAddressSetting { u8 automatic; NifmIpV4Address current, mask, gateway; };
     struct NifmDnsSetting { u8 automatic; NifmIpV4Address primary, secondary; };
@@ -112,10 +116,10 @@ AMS_SF_DEFINE_INTERFACE(ztnx::mitm, INifmShim, AMS_ZTNX_NIFM_ROOT, 0x5A544E46)
 
 namespace ztnx::mitm {
     class NifmRequestShim {
-        Service m_forward;
+        NifmServiceOwner<Service, CloseNifmService> m_forward;
         u64 m_pid;
         u64 m_program_id;
-        bool m_readiness_barrier_complete{false};
+        NifmReadinessBarrier m_readiness_barrier;
         s8 m_connection_confirmation_option{0};
         bool m_ryujinx_shoal_wait_complete{false};
         ams::os::SystemEvent m_ryujinx_state_event;
@@ -129,7 +133,7 @@ namespace ztnx::mitm {
         #undef ZTNX_DECLARE
     };
     class NifmGeneralShim {
-        Service m_forward;
+        NifmServiceOwner<Service, CloseNifmService> m_forward;
         u64 m_pid;
         u64 m_program_id;
       public:
